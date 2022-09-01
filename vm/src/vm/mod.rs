@@ -31,9 +31,13 @@ use crate::{
     import,
     protocol::PyIterIter,
     scope::Scope,
-    signal, stdlib, AsObject, PyObject, PyObjectRef, PyPayload, PyRef, PyResult,
+    signal, stdlib, AsObject, PyObject, PyObjectRef, PyPayload, PyRef, PyResult, mmtk::DummyVM,
+    mmtk::api::{mmtk_init, mmtk_process, mmtk_bind_mutator, mmtk_initialize_collection},
 };
+use std::ffi::CString;
 use crossbeam_utils::atomic::AtomicCell;
+use mmtk::Mutator;
+use mmtk::util::opaque_pointer::*;
 use std::sync::atomic::AtomicBool;
 use std::{
     borrow::Cow,
@@ -70,6 +74,12 @@ pub struct VirtualMachine {
     pub state: PyRc<PyGlobalState>,
     pub initialized: bool,
     recursion_depth: Cell<usize>,
+}
+
+thread_local! {
+  // static INNER: u8 = 0;
+  // pub static MUTATOR_HANDLE: *mut Mutator<DummyVM> = mmtk_bind_mutator(VMMutatorThread(VMThread(&INNER as *mut libc::c_void)));
+  pub static MUTATOR_HANDLE: *mut Mutator<DummyVM> = mmtk_bind_mutator(VMMutatorThread(VMThread::UNINITIALIZED));
 }
 
 #[derive(Debug, Default)]
@@ -135,6 +145,13 @@ impl VirtualMachine {
         let hash_secret = HashSecret::new(seed);
 
         let codec_registry = CodecsRegistry::new(&ctx);
+
+        // TODO: Make this variable configurable setting environment variables
+        const MB: usize = 1024 * 1024 * 1024 * 1024;
+        mmtk_init(MB);
+        mmtk_initialize_collection(VMThread::UNINITIALIZED);
+        // Ref: https://github.com/mmtk/mmtk-core/blob/master/src/util/options.rs#L336-L401
+        mmtk_process(CString::new("plan").unwrap().as_c_str(), CString::new("NoGC").unwrap().as_c_str());
 
         let mut vm = VirtualMachine {
             builtins,

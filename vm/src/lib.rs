@@ -78,6 +78,7 @@ pub mod utils;
 pub mod version;
 pub mod vm;
 pub mod warn;
+pub mod mmtk;
 
 pub use self::convert::{TryFromBorrowedObject, TryFromObject};
 pub use self::object::{

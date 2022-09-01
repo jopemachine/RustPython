@@ -11,27 +11,29 @@
 //! PyRef<PyWeak> may looking like to be called as PyObjectWeak by the rule,
 //! but not to do to remember it is a PyRef object.
 
+use mmtk::util::Address;
+
 use super::{
     ext::{AsObject, PyResult},
     payload::PyObjectPayload,
 };
-use crate::common::{
+use crate::{common::{
     atomic::{OncePtr, PyAtomic, Radium},
     linked_list::{Link, LinkedList, Pointers},
     lock::{PyMutex, PyMutexGuard, PyRwLock},
     refcount::RefCount,
-};
+}, mmtk::api::mmtk_alloc};
 use crate::{
     builtins::{PyDictRef, PyTypeRef},
-    vm::VirtualMachine,
+    vm::{VirtualMachine, MUTATOR_HANDLE}
 };
 use std::{
     any::TypeId,
-    borrow::Borrow,
+    borrow::{Borrow},
     cell::UnsafeCell,
     fmt,
     marker::PhantomData,
-    mem::ManuallyDrop,
+    mem::{ManuallyDrop, self},
     ops::Deref,
     ptr::{self, NonNull},
 };
@@ -426,18 +428,29 @@ impl InstanceDict {
 }
 
 impl<T: PyObjectPayload> PyInner<T> {
-    fn new(payload: T, typ: PyTypeRef, dict: Option<PyDictRef>) -> Box<Self> {
+    fn new(payload: T, typ: PyTypeRef, dict: Option<PyDictRef>) -> Address {
         let member_count = typ.slots.member_count;
-        Box::new(PyInner {
-            ref_count: RefCount::new(),
-            typeid: TypeId::of::<T>(),
-            vtable: PyObjVTable::of::<T>(),
-            typ: PyRwLock::new(typ),
-            dict: dict.map(InstanceDict::new),
-            weak_list: WeakRefList::new(),
-            payload,
-            slots: vec![None; member_count],
-        })
+        let handle = MUTATOR_HANDLE.with(|handle| *handle);
+
+        let inner = PyInner {
+          ref_count: RefCount::new(),
+          typeid: TypeId::of::<T>(),
+          vtable: PyObjVTable::of::<T>(),
+          typ: PyRwLock::new(typ),
+          dict: dict.map(InstanceDict::new),
+          weak_list: WeakRefList::new(),
+          payload,
+          slots: vec![None; member_count],
+        };
+
+        println!("mem::size_of::<PyInner<T>>(): {}", mem::size_of::<PyInner<T>>());
+        println!("handle: {}", handle as usize);
+        let addr = mmtk_alloc(handle, mem::size_of::<PyInner<T>>(), 8, 0, mmtk::AllocationSemantics::Default);
+        println!("done!");
+        unsafe {
+          addr.store(inner);
+        }
+        addr
     }
 }
 
@@ -971,7 +984,8 @@ impl<T: PyObjectPayload> PyRef<T> {
 
     #[inline(always)]
     pub fn new_ref(payload: T, typ: crate::builtins::PyTypeRef, dict: Option<PyDictRef>) -> Self {
-        let inner = Box::into_raw(PyInner::new(payload, typ, dict));
+        let addr = PyInner::new(payload, typ, dict);
+        let inner = addr.to_mut_ptr::<T>();
         Self {
             ptr: unsafe { NonNull::new_unchecked(inner.cast::<Py<T>>()) },
         }
