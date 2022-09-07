@@ -46,8 +46,11 @@ extern crate log;
 mod shell;
 
 use clap::{App, AppSettings, Arg, ArgMatches};
-use rustpython_vm::{scope::Scope, Interpreter, PyResult, Settings, VirtualMachine};
+use rustpython_vm::{scope::Scope, Interpreter, PyResult, Settings, VirtualMachine, mmtk::{api::{mmtk_init, mmtk_initialize_collection, mmtk_process, mmtk_bind_mutator}}};
+use vm::{vm::MUTATOR_HANDLE, mmtk::api::mmtk_alloc};
 use std::{env, process::ExitCode, str::FromStr};
+use std::ffi::CString;
+use mmtk::{util::opaque_pointer::*, AllocationSemantics};
 
 pub use rustpython_vm as vm;
 
@@ -57,9 +60,20 @@ pub fn run<F>(init: F) -> ExitCode
 where
     F: FnOnce(&mut VirtualMachine),
 {
+    // TODO: Make this variable configurable setting environment variables
+    const MB: usize = 1024 * 1024 * 1024 * 1024;
+    mmtk_init(MB);
+    mmtk_initialize_collection(VMThread::UNINITIALIZED);
+    // Ref: https://github.com/mmtk/mmtk-core/blob/master/src/util/options.rs#L336-L401
+    mmtk_process(CString::new("plan").unwrap().as_c_str(), CString::new("NoGC").unwrap().as_c_str());
+
+    MUTATOR_HANDLE.with(|f| {
+      (*f).replace(mmtk_bind_mutator(VMMutatorThread(VMThread::UNINITIALIZED)));
+    });
+
     #[cfg(feature = "flame-it")]
     let main_guard = flame::start_guard("RustPython main");
-    env_logger::init();
+    // env_logger::init();
     let app = App::new("RustPython");
     let matches = parse_arguments(app);
     let matches = &matches;

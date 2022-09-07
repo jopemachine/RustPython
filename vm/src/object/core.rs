@@ -22,10 +22,10 @@ use crate::{common::{
     linked_list::{Link, LinkedList, Pointers},
     lock::{PyMutex, PyMutexGuard, PyRwLock},
     refcount::RefCount,
-}, mmtk::api::mmtk_alloc};
+}, mmtk::api::mmtk_alloc, vm::MUTATOR_HANDLE};
 use crate::{
     builtins::{PyDictRef, PyTypeRef},
-    vm::{VirtualMachine, MUTATOR_HANDLE}
+    vm::{VirtualMachine},
 };
 use std::{
     any::TypeId,
@@ -33,7 +33,7 @@ use std::{
     cell::UnsafeCell,
     fmt,
     marker::PhantomData,
-    mem::{ManuallyDrop, self},
+    mem::{ManuallyDrop},
     ops::Deref,
     ptr::{self, NonNull},
 };
@@ -430,23 +430,23 @@ impl InstanceDict {
 impl<T: PyObjectPayload> PyInner<T> {
     fn new(payload: T, typ: PyTypeRef, dict: Option<PyDictRef>) -> Address {
         let member_count = typ.slots.member_count;
-        let handle = MUTATOR_HANDLE.with(|handle| *handle);
+        let handle = MUTATOR_HANDLE.with(|handle| (*handle).get());
 
         let inner = PyInner {
           ref_count: RefCount::new(),
           typeid: TypeId::of::<T>(),
           vtable: PyObjVTable::of::<T>(),
-          typ: PyRwLock::new(typ),
+          typ: PyRwLock::new(typ.to_owned()),
           dict: dict.map(InstanceDict::new),
           weak_list: WeakRefList::new(),
           payload,
           slots: vec![None; member_count],
         };
 
-        println!("mem::size_of::<PyInner<T>>(): {}", mem::size_of::<PyInner<T>>());
-        println!("handle: {}", handle as usize);
-        let addr = mmtk_alloc(handle, mem::size_of::<PyInner<T>>(), 8, 0, mmtk::AllocationSemantics::Default);
-        println!("done!");
+        let size = std::mem::size_of_val::<PyInner<T>>(&inner);
+
+        let addr = mmtk_alloc(handle, size, 8, 0, mmtk::AllocationSemantics::Default);
+
         unsafe {
           addr.store(inner);
         }

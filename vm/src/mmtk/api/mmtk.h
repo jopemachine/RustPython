@@ -18,7 +18,7 @@ extern "C" {
 typedef void* MMTk_Mutator;
 
 // For os that does not have ssize_t
-typedef std::make_signed<size_t>::type ssize_t;
+// typedef std::make_signed<size_t>::type ssize_t;
 
 // Initialize an MMTk instance
 extern void mmtk_init(size_t heap_size);
